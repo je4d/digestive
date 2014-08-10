@@ -1,0 +1,20 @@
+This software is provided 'as-is', without any express or implied warranty.
+In no event will the author be held liable for any damages arising from the
+use of this software.
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+
+ 1. The origin of this software must not be misrepresented; you must not
+    claim that you wrote the original software.
+ 2. If you use this software in a product, an acknowledgment in the product
+    documentation would be appreciated but is not required. 
+ 3. Altered source versions must be plainly marked as such, and must not be
+    misrepresented as being the original software.
+
+Copyright (c) 2014 Jeff Snyder, https://github.com/je4d
+
+Based on the Portable C++ Hashing Library by Stephan Brumme, used with
+permission as granted by the license from
+http://create.stephan-brumme.com/disclaimer.html, reproduced and reused above.
+Copyright (c) 2014 Stephan Brumme
