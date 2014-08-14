@@ -1,14 +1,35 @@
-#ifndef DIGESTIVE_KECCAK_HPP
-#define DIGESTIVE_KECCAK_HPP
+#ifndef DIGESTIVE_KECCAK_CORE_HPP
+#define DIGESTIVE_KECCAK_CORE_HPP
 
 #include <cstdint>
 #include <iterator>
 #include <algorithm>
 
+#include "digest.hpp"
 #include "endian.hpp"
 
 namespace digestive {
-namespace keccak_detail {
+namespace keccak_core {
+
+template <std::size_t DigestLength, typename Digest>
+struct traits_fix
+{
+    static constexpr bool extendable = false;
+    static constexpr size_t capacity = 2*DigestLength;
+    static constexpr size_t rate = 1600-capacity;
+    static constexpr size_t digest_length = DigestLength;
+    using digest = Digest;
+};
+
+template <std::size_t Capacity, template<std::size_t> class Digest>
+struct traits_xof
+{
+    static constexpr bool extendable = true;
+    static constexpr size_t capacity = Capacity;
+    static constexpr size_t rate = 1600-capacity;
+    template <std::size_t XofBits>
+    using digest = Digest<XofBits>;
+};
 
 constexpr unsigned int rounds = 24;
 constexpr uint64_t xor_masks[rounds] {
@@ -36,6 +57,10 @@ constexpr unsigned int mod5(unsigned int x)
 
 constexpr std::size_t StateBits = 1600;
 using state_array = std::uint64_t[StateBits/64];
+
+struct state {
+    state_array array{};
+};
 
 void permute(state_array& state)
 {
@@ -111,7 +136,7 @@ void permute(state_array& state)
 template <std::size_t Rate>
 void process(state_array& state, const char* block)
 {
-    static_assert(Rate%64 == 0, "keccak_detail::process<Rate> expectes Rate to "
+    static_assert(Rate%64 == 0, "keccak_core::process<Rate> expectes Rate to "
                                 "be a multiple of 64");
     const std::uint64_t* data64 = reinterpret_cast<const std::uint64_t*>(block);
     using namespace std;
@@ -121,6 +146,30 @@ void process(state_array& state, const char* block)
             });
     permute(state);
 }
+
+template <std::size_t Rate, std::size_t DigestLength>
+void extract_digest(state_array& state, digest<DigestLength>& digest)
+{
+    std::size_t bits = digestive::digest<DigestLength>::size;
+    char* digest_out = digest.m_digest;
+    while (bits > Rate) {
+        detail::extract_digest<
+                std::uint64_t,
+                detail::endian::little,
+                Rate,
+                detail::bit_order::lsb0
+            >(state, digest_out);
+        digest_out += Rate/8;
+        bits -= Rate;
+        keccak_core::permute(state);
+    }
+    detail::extract_digest<
+            std::uint64_t,
+            detail::endian::little,
+            DigestLength % Rate,
+            detail::bit_order::lsb0
+        >(state, digest_out);
+};
 
 } // namespace keccak_deatil
 } // namespace digestive

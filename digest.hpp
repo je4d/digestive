@@ -66,7 +66,6 @@ struct digest {
     explicit operator std::string() const {
         static const char dec2hex[] = "0123456789abcdef";
         char buf[size_bytes*2+1];
-        const char* in = m_digest;
         char* out = buf;
         for (const auto& byte : m_digest) {
             auto u8byte = static_cast<uint8_t>(byte);
