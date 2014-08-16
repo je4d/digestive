@@ -5,30 +5,23 @@
 #include <iterator>
 #include <algorithm>
 
+#include "buffer.hpp"
 #include "digest.hpp"
 #include "endian.hpp"
 
 namespace digestive {
 namespace keccak_core {
 
-template <std::size_t DigestLength, typename Digest>
-struct traits_fix
+template <std::size_t Capacity>
+struct traits
 {
-    static constexpr bool extendable = false;
-    static constexpr size_t capacity = 2*DigestLength;
-    static constexpr size_t rate = 1600-capacity;
-    static constexpr size_t digest_length = DigestLength;
-    using digest = Digest;
-};
-
-template <std::size_t Capacity, template<std::size_t> class Digest>
-struct traits_xof
-{
-    static constexpr bool extendable = true;
-    static constexpr size_t capacity = Capacity;
-    static constexpr size_t rate = 1600-capacity;
-    template <std::size_t XofBits>
-    using digest = Digest<XofBits>;
+    static constexpr std::size_t width = 1600;
+    static constexpr std::size_t capacity = Capacity;
+    static constexpr std::size_t rate = width-capacity;
+    static_assert(Capacity%64 == 0, "Keccak's Rate and Capacity must be "
+                                    "multiples of 64");
+    static_assert(rate%64 == 0,     "Keccak's Rate and Capacity must be "
+                                    "multiples of 64");
 };
 
 constexpr unsigned int rounds = 24;
@@ -56,13 +49,10 @@ constexpr unsigned int mod5(unsigned int x)
 }
 
 constexpr std::size_t StateBits = 1600;
-using state_array = std::uint64_t[StateBits/64];
 
-struct state {
-    state_array array{};
-};
+struct state : std::array<uint64_t,StateBits/64> {};
 
-void permute(state_array& state)
+void permute(state& state)
 {
     // re-compute state
     for (unsigned int round = 0; round < rounds; round++)
@@ -133,44 +123,94 @@ void permute(state_array& state)
     }
 }
 
-template <std::size_t Rate>
-void process(state_array& state, const char* block)
+template <std::size_t Capacity>
+void process(state& state, const char* block)
 {
-    static_assert(Rate%64 == 0, "keccak_core::process<Rate> expectes Rate to "
-                                "be a multiple of 64");
+    constexpr auto rate = traits<Capacity>::rate;
     const std::uint64_t* data64 = reinterpret_cast<const std::uint64_t*>(block);
     using namespace std;
-    transform(begin(state), next(state,Rate/64), data64, begin(state),
+    transform(begin(state), next(begin(state),rate/64), data64, begin(state),
             [](std::uint64_t a, std::uint64_t b) {
                 return a^detail::endian_host_to_little(b);
             });
     permute(state);
 }
 
-template <std::size_t Rate, std::size_t DigestLength>
-void extract_digest(state_array& state, digest<DigestLength>& digest)
+template <std::size_t Capacity, uint8_t LeadBits, std::size_t BufSize>
+void finalize(detail::buffer<BufSize>& buffer, state& state)
 {
-    std::size_t bits = digestive::digest<DigestLength>::size;
-    char* digest_out = digest.m_digest;
-    while (bits > Rate) {
+    auto position = buffer.position;
+    *position++ = LeadBits;
+    std::fill(position, std::end(buffer.data), 0ull);
+    *std::prev(std::end(buffer.data)) |= 0x80;
+    process<Capacity>(state, begin(buffer.data));
+}
+
+template <std::size_t Capacity, std::size_t DigestLength>
+void extract_digest(state& state, char* digest_out)
+{
+    constexpr auto rate = traits<Capacity>::rate;
+    std::size_t bits = DigestLength;
+    while (bits > rate) {
         detail::extract_digest<
                 std::uint64_t,
                 detail::endian::little,
-                Rate,
+                rate,
                 detail::bit_order::lsb0
-            >(state, digest_out);
-        digest_out += Rate/8;
-        bits -= Rate;
-        keccak_core::permute(state);
+            >(begin(state), digest_out);
+        digest_out += rate/8;
+        bits -= rate;
+        permute(state);
     }
     detail::extract_digest<
             std::uint64_t,
             detail::endian::little,
-            DigestLength % Rate,
+            DigestLength % rate,
             detail::bit_order::lsb0
-        >(state, digest_out);
+        >(begin(state), digest_out);
 };
 
-} // namespace keccak_deatil
+namespace adl_shield
+{
+template <std::size_t Capacity>
+struct keccak
+{
+    void operator()(const char* data, size_t size)
+    {
+        m_buffer.process(data, size, [&](const char* block){
+                process<Capacity>(m_state, block);
+        });
+    }
+
+    state                                    m_state{};
+    detail::buffer<traits<Capacity>::rate/8> m_buffer;
+};
+
+template <typename T>
+struct xof_digest_typedef;
+
+template <template<std::size_t>class TT, std::size_t DigestLength>
+struct xof_digest_typedef<TT<DigestLength>>
+{
+    using digest = digestive::digest<TT<DigestLength>>;
+    static constexpr std::size_t digest_length = DigestLength;
+};
+
+template <template<std::size_t>class TT>
+struct xof_digest_typedef<TT<0>>
+{
+    template <std::size_t DigestLength>
+    using digest = digestive::digest<TT<DigestLength>>;
+};
+
+}
+
+template <std::size_t Capacity>
+using keccak = adl_shield::keccak<Capacity>;
+
+template <typename T>
+using xof_digest_typedef = adl_shield::xof_digest_typedef<T>;
+
+} // namespace keccak_core
 } // namespace digestive
-#endif // KECCACK_HPP
+#endif // DIGESTIVE_KECCACK_CORE_HPP

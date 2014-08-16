@@ -8,140 +8,78 @@
 
 namespace digestive {
 
-enum keccak_output {
-    keccak_224,
-    keccak_256,
-    keccak_384,
-    keccak_512,
-    keccak_default
-};
-
-template <keccak_output Output, std::size_t XofBits=0>
-class keccak_digest;
-
-namespace keccak_detail {
-    template <keccak_output Output, std::size_t DigestLength>
-    using traits_fix = keccak_core::traits_fix<DigestLength,
-                                                 keccak_digest<Output>>;
-    template <keccak_output Output, std::size_t Capacity>
-    struct traits_xof_impl {
-        template <std::size_t XofBits>
-        using type = keccak_digest<Output,XofBits>;
-        using traits = keccak_core::traits_xof<Capacity, type>;
-    };
-    template <keccak_output Output, std::size_t Capacity>
-    using traits_xof = typename traits_xof_impl<Output,Capacity>::traits;
-
-    template <keccak_output Output>
-    struct traits;
-    template<>struct traits<keccak_224    >:traits_fix<keccak_224,    224>{};
-    template<>struct traits<keccak_256    >:traits_fix<keccak_256,    256>{};
-    template<>struct traits<keccak_384    >:traits_fix<keccak_384,    384>{};
-    template<>struct traits<keccak_512    >:traits_fix<keccak_512,    512>{};
-    template<>struct traits<keccak_default>:traits_xof<keccak_default,576>{};
-} // namespace keccak_detail
-
-template <keccak_output Output, std::size_t XofBits>
-class keccak_digest : digest<XofBits>
+template <typename T, std::size_t DigestLength>
+struct keccak_fix : private keccak_core::keccak<DigestLength*2>
 {
-    static_assert(keccak_detail::traits<Output>::extendable,
-            "XofBits should not only be explicitly set for keccak_digest in "
-            "variable-length digest mode");
-    template <typename,typename,bool> friend class keccak_outputfn;
-    using digest = typename keccak_digest::digest;
-public:
-    using digest::operator std::string;
-};
+private:
+    static constexpr std::size_t capacity = DigestLength*2;
+    using base = keccak_core::keccak<capacity>;
 
-template <keccak_output Output>
-class keccak_digest<Output,0>
-    : digest<keccak_detail::traits<Output>::digest_length>
-{
-    template <typename,typename,bool> friend class keccak_outputfn;
-    using base = typename keccak_digest::digest;
 public:
-    using base::operator std::string;
-};
-
-template <typename Sha3, typename Traits, bool Extendable>
-class keccak_outputfn
-{
-public:
-    using digest = typename Traits::digest;
-    static constexpr std::size_t rate = Traits::rate;
+    using digest = digestive::digest<T>;
+    static constexpr std::size_t digest_length = DigestLength;
+    using digest_generating_type = keccak_fix;
+    using base::operator();
 
     explicit operator digest() const &
     {
-        const Sha3* realThis{static_cast<const Sha3*>(this)};
-        return digest(Sha3(*realThis));
+        return digest(keccak_fix(*this));
     }
 
     explicit operator digest() &&
     {
+        keccak_core::finalize<capacity,0x1>(this->m_buffer,this->m_state);
         digest ret;
-        Sha3* realThis{static_cast<Sha3*>(this)};
-        auto& buffer = realThis->m_buffer.data();
-        auto position = realThis->m_buffer.position;
-        *position++ = 0x1;
-        std::fill(position, std::end(buffer), 0ull);
-        *std::prev(std::end(buffer)) |= 0x80;
-        keccak_core::process<rate>(realThis->m_state.array, buffer);
-        keccak_core::extract_digest<rate>(realThis->m_state.array, ret);
+        keccak_core::extract_digest<capacity,digest_length>(this->m_state,
+                                                            ret.m_digest);
         return ret;
     }
 };
 
-template <typename Sha3, typename Traits>
-class keccak_outputfn<Sha3,Traits,true>
-{
-    static constexpr std::size_t rate = Traits::rate;
-public:
-    template <std::size_t XofBits>
-    using digest = typename Traits::template digest<XofBits>;
+template <typename T, std::size_t Capacity>
+struct keccak_xof;
 
-    template <std::size_t XofBits>
-    explicit operator digest<XofBits>() const &
+template <template<std::size_t>class TT, std::size_t DigestLength,
+                                         std::size_t Capacity>
+struct keccak_xof<TT<DigestLength>, Capacity> :
+    private keccak_core::keccak<Capacity>,
+    keccak_core::xof_digest_typedef<TT<DigestLength>>
+{
+    using base = keccak_core::keccak<Capacity>;
+public:
+    using digest_generating_type = keccak_xof;
+    using base::operator();
+
+    template <std::size_t Length>
+    explicit operator digestive::digest<TT<Length>>() const &
     {
-        const Sha3* realThis{static_cast<const Sha3*>(this)};
-        return digest<XofBits>(Sha3(*realThis));
+        return digest<TT<Length>>(keccak_xof(*this));
     }
 
-    template <std::size_t XofBits>
-    explicit operator digest<XofBits>() &&
+    template <std::size_t Length>
+    explicit operator digest<TT<Length>>() &&
     {
-        using digest = keccak_outputfn::digest<XofBits>;
-        digest ret;
-        Sha3* realThis{static_cast<Sha3*>(this)};
-        auto& buffer = realThis->m_buffer.data();
-        auto position = realThis->m_buffer.position;
-        *position++ = 0x1;
-        std::fill(position, std::end(buffer), 0ull);
-        *std::prev(std::end(buffer)) |= 0x80;
-        keccak_core::process<rate>(realThis->m_state.array, buffer);
-        keccak_core::extract_digest<rate>(realThis->m_state.array, ret);
+        keccak_core::finalize<Capacity,0x1>(this->m_buffer,this->m_state);
+        digestive::digest<TT<Length>> ret;
+        char* digest_out = keccak_xof<TT<Length>,Capacity>::priv_digest(ret);
+        keccak_core::extract_digest<Capacity,Length>(this->m_state, digest_out);
         return ret;
-    }
-};
-
-template <keccak_output Output>
-class keccak : public keccak_outputfn<keccak<Output>,
-                                      keccak_detail::traits<Output>,
-                                      keccak_detail::traits<Output>::extendable>
-{
-    using traits = typename keccak_detail::traits<Output>;
-public:
-    void operator()(const char* data, size_t size)
-    {
-        m_buffer.process(data, size, [&](const char* block){
-                keccak_core::process<traits::rate>(m_state.array, block);
-        });
     }
 
 private:
-    keccak_core::state           m_state;
-    detail::buffer<traits::rate/8> m_buffer;
-    friend class keccak::keccak_outputfn;
+    template <std::size_t Length>
+    static char* priv_digest(digestive::digest<TT<Length>>& digest)
+    { return digest.m_digest; }
+    template <typename,std::size_t>
+    friend struct keccak_xof;
 };
+
+struct keccak_224     : keccak_fix<keccak_224,    224> {};
+struct keccak_256     : keccak_fix<keccak_256,    256> {};
+struct keccak_384     : keccak_fix<keccak_384,    384> {};
+struct keccak_512     : keccak_fix<keccak_512,    512> {};
+template <std::size_t DigestLength = 0>
+struct keccak_default : keccak_xof<keccak_default<DigestLength>,576> {};
 
 } // namespace digestive
 

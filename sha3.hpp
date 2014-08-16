@@ -8,143 +8,83 @@
 
 namespace digestive {
 
-enum sha3_output {
-    sha3_224,
-    sha3_256,
-    sha3_384,
-    sha3_512,
-    shake128,
-    shake256
-};
-
-template <sha3_output Output, std::size_t XofBits=0>
-class sha3_digest;
-
-namespace sha3_detail {
-    template <sha3_output Output, std::size_t DigestLength>
-    using traits_fix = keccak_core::traits_fix<DigestLength,
-                                                 sha3_digest<Output>>;
-    template <sha3_output Output, std::size_t Capacity>
-    struct sha3_xof_traits_holder {
-        template <std::size_t XofBits>
-        using type = sha3_digest<Output,XofBits>;
-        using traits = keccak_core::traits_xof<Capacity, type>;
-    };
-    template <sha3_output Output, std::size_t Capacity>
-    using traits_xof = typename sha3_xof_traits_holder<Output,Capacity>::traits;
-
-    template <sha3_output Output>
-    struct traits;
-    template<>struct traits<sha3_224>:traits_fix<sha3_224,224>{};
-    template<>struct traits<sha3_256>:traits_fix<sha3_256,256>{};
-    template<>struct traits<sha3_384>:traits_fix<sha3_384,384>{};
-    template<>struct traits<sha3_512>:traits_fix<sha3_512,512>{};
-    template<>struct traits<shake128>:traits_xof<shake128,256>{};
-    template<>struct traits<shake256>:traits_xof<shake256,512>{};
-} // namespace sha3_detail
-
-template <sha3_output Output, std::size_t XofBits>
-class sha3_digest : digest<XofBits>
+template <typename T, std::size_t DigestLength>
+struct sha3_fix : private keccak_core::keccak<DigestLength*2>
 {
-    static_assert(sha3_detail::traits<Output>::extendable,
-            "XofBits should not only be explicitly set for sha3_digest in "
-            "shake128/shake256 modes");
-    template <typename,typename,bool> friend class sha3_outputfn;
-    using digest = typename sha3_digest::digest;
-public:
-    using digest::operator std::string;
-};
+private:
+    static constexpr std::size_t capacity = DigestLength*2;
+    using base = keccak_core::keccak<capacity>;
 
-template <sha3_output Output>
-class sha3_digest<Output,0> : digest<sha3_detail::traits<Output>::digest_length>
-{
-    template <typename,typename,bool> friend class sha3_outputfn;
-    using base = typename sha3_digest::digest;
 public:
-    using base::operator std::string;
-};
-
-template <typename Sha3, typename Traits, bool Extendable>
-class sha3_outputfn
-{
-public:
-    using digest = typename Traits::digest;
-    static constexpr std::size_t rate = Traits::rate;
+    using digest = digestive::digest<T>;
+    static constexpr std::size_t digest_length = DigestLength;
+    using digest_generating_type = sha3_fix;
+    using base::operator();
 
     explicit operator digest() const &
     {
-        const Sha3* realThis{static_cast<const Sha3*>(this)};
-        return digest(Sha3(*realThis));
+        return digest(sha3_fix(*this));
     }
 
     explicit operator digest() &&
     {
-        digest ret;
-        Sha3* realThis{static_cast<Sha3*>(this)};
-        auto& buffer = realThis->m_buffer.data();
-        auto position = realThis->m_buffer.position;
         // Sha3(M) = Keccak(M || 01) = process(M || 01 || 10*1), in LSB0
-        *position++ = 0x6;
-        std::fill(position, std::end(buffer), 0ull);
-        *std::prev(std::end(buffer)) |= 0x80;
-        keccak_core::process<Traits::rate>(realThis->m_state.array, buffer);
-        keccak_core::extract_digest<rate>(realThis->m_state.array, ret);
-        return ret;
-    }
-};
-
-template <typename Sha3, typename Traits>
-class sha3_outputfn<Sha3,Traits,true>
-{
-    static constexpr std::size_t rate = Traits::rate;
-public:
-    template <std::size_t XofBits>
-    using digest = typename Traits::template digest<XofBits>;
-
-    template <std::size_t XofBits>
-    explicit operator digest<XofBits>() const &
-    {
-        const Sha3* realThis{static_cast<const Sha3*>(this)};
-        return digest<XofBits>(Sha3(*realThis));
-    }
-
-    template <std::size_t XofBits>
-    explicit operator digest<XofBits>() &&
-    {
-        using digest = sha3_outputfn::digest<XofBits>;
+        keccak_core::finalize<capacity,0x6>(this->m_buffer,this->m_state);
         digest ret;
-        Sha3* realThis{static_cast<Sha3*>(this)};
-        auto& buffer = realThis->m_buffer.data();
-        auto position = realThis->m_buffer.position;
-        // Shake*(M) = Keccak(M || 1111) = process(M || 1111 || 10*1), in LSB0
-        *position++ = 0x1F;
-        std::fill(position, std::end(buffer), 0ull);
-        *std::prev(std::end(buffer)) |= 0x80;
-        keccak_core::process<rate>(realThis->m_state.array, buffer);
-        keccak_core::extract_digest<rate>(realThis->m_state.array, ret);
+        keccak_core::extract_digest<capacity,digest_length>(this->m_state,
+                                                            ret.m_digest);
         return ret;
     }
 };
 
-template <sha3_output Output>
-class sha3 : public sha3_outputfn<sha3<Output>,
-                                  sha3_detail::traits<Output>,
-                                  sha3_detail::traits<Output>::extendable>
+template <typename T, std::size_t Capacity>
+struct sha3_xof;
+
+template <template<std::size_t>class TT, std::size_t DigestLength,
+                                         std::size_t Capacity>
+struct sha3_xof<TT<DigestLength>, Capacity> :
+    private keccak_core::keccak<Capacity>,
+    keccak_core::xof_digest_typedef<TT<DigestLength>>
 {
-    using traits = typename sha3_detail::traits<Output>;
+    using base = keccak_core::keccak<Capacity>;
 public:
-    void operator()(const char* data, size_t size)
+    using digest_generating_type = sha3_xof;
+    using base::operator();
+
+    template <std::size_t Length>
+    explicit operator digestive::digest<TT<Length>>() const &
     {
-        m_buffer.process(data, size, [&](const char* block){
-                keccak_core::process<traits::rate>(m_state.array, block);
-        });
+        return digest<TT<Length>>(sha3_xof(*this));
+    }
+
+    template <std::size_t Length>
+    explicit operator digest<TT<Length>>() &&
+    {
+        // Shake*(M) = Keccak(M || 1111) = process(M || 1111 || 10*1), in LSB0
+        // 0x1f = 0b00011111
+        keccak_core::finalize<Capacity,0x1f>(this->m_buffer,this->m_state);
+        digestive::digest<TT<Length>> ret;
+        char* digest_out = sha3_xof<TT<Length>,Capacity>::priv_digest(ret);
+        keccak_core::extract_digest<Capacity,Length>(this->m_state, digest_out);
+        return ret;
     }
 
 private:
-    keccak_core::state           m_state;
-    detail::buffer<traits::rate/8> m_buffer;
-    friend class sha3::sha3_outputfn;
+    template <std::size_t Length>
+    static char* priv_digest(digestive::digest<TT<Length>>& digest)
+    { return digest.m_digest; }
+    template <typename,std::size_t>
+    friend struct sha3_xof;
 };
+
+struct sha3_224 : sha3_fix<sha3_224,224> {};
+struct sha3_256 : sha3_fix<sha3_256,256> {};
+struct sha3_384 : sha3_fix<sha3_384,384> {};
+struct sha3_512 : sha3_fix<sha3_512,512> {};
+template <std::size_t DigestLength = 0>
+struct shake128 : sha3_xof<shake128<DigestLength>,256> {};
+template <std::size_t DigestLength = 0>
+struct shake256 : sha3_xof<shake256<DigestLength>,512> {};
 
 } // namespace digestive
 

@@ -26,15 +26,17 @@ void test135()
 
 int main(int argc, char** argv)
 {
-    test0bit<digestive::sha3<digestive::sha3_224>>();
-    test0bit<digestive::sha3<digestive::sha3_256>>();
-    test0bit<digestive::sha3<digestive::sha3_384>>();
-    test0bit<digestive::sha3<digestive::sha3_512>>();
-//    test0bit<digestive::sha3<digestive::shake128>,
-//                digestive::sha3_digest<digestive::shake128,4096>>();
-//    test0bit<digestive::sha3<digestive::shake256>,
-//                digestive::sha3_digest<digestive::shake256,4096>>();
-    test135<digestive::sha3<digestive::sha3_256>>();
+    test0bit<digestive::sha3_224>();
+    test0bit<digestive::sha3_256>();
+    test0bit<digestive::sha3_384>();
+    test0bit<digestive::sha3_512>();
+    test0bit<digestive::shake128<4096>>();
+    test0bit<digestive::shake128<>,
+             digestive::digest<digestive::shake128<4096>>>();
+    test0bit<digestive::shake256<4096>>();
+    test0bit<digestive::shake256<>,
+             digestive::digest<digestive::shake256<4096>>>();
+//    test135<digestive::sha3_256>();
 
 /*  hash-library bug test case
     digestive::sha3<digestive::sha3_256> digester;

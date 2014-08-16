@@ -57,15 +57,14 @@ void extract_digest(const T* in, char* out)
 
 } // namespace detail
 
-template <std::size_t Bits>
+template <typename T>
 struct digest {
-    static constexpr std::size_t size = Bits;
-    static constexpr std::size_t size_bytes = (Bits+7)/8;
+    static constexpr std::size_t length = T::digest_length;
+    static constexpr std::size_t length_bytes = (length+7)/8;
     digest()=default;
-    char m_digest[size_bytes]{};
     explicit operator std::string() const {
         static const char dec2hex[] = "0123456789abcdef";
-        char buf[size_bytes*2+1];
+        char buf[length_bytes*2+1];
         char* out = buf;
         for (const auto& byte : m_digest) {
             auto u8byte = static_cast<uint8_t>(byte);
@@ -75,6 +74,9 @@ struct digest {
         *out = '\0';
         return std::string(buf);
     }
+private:
+    char m_digest[length_bytes]{};
+    friend typename T::digest_generating_type;
 };
 
 } // namespace digestive
