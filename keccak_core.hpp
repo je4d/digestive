@@ -48,9 +48,7 @@ constexpr unsigned int mod5(unsigned int x)
     return (x < 5) ? x : x - 5;
 }
 
-constexpr std::size_t StateBits = 1600;
-
-struct state : std::array<uint64_t,StateBits/64> {};
+struct state : std::array<uint64_t,1600/64> {};
 
 void permute(state& state)
 {
@@ -149,6 +147,8 @@ void finalize(detail::buffer<BufSize>& buffer, state& state)
 template <std::size_t Capacity, std::size_t DigestLength>
 void extract_digest(state& state, char* digest_out)
 {
+    if (DigestLength == 0)
+        return;
     constexpr auto rate = traits<Capacity>::rate;
     std::size_t bits = DigestLength;
     while (bits > rate) {
@@ -165,7 +165,7 @@ void extract_digest(state& state, char* digest_out)
     detail::extract_digest<
             std::uint64_t,
             detail::endian::little,
-            DigestLength % rate,
+            (DigestLength-1) % rate + 1,
             detail::bit_order::lsb0
         >(begin(state), digest_out);
 };
@@ -187,20 +187,20 @@ struct keccak
 };
 
 template <typename T>
-struct xof_digest_typedef;
+struct xof_result_type;
 
 template <template<std::size_t>class TT, std::size_t DigestLength>
-struct xof_digest_typedef<TT<DigestLength>>
+struct xof_result_type<TT<DigestLength>>
 {
-    using digest = digestive::digest<TT<DigestLength>>;
+    using result_type = digestive::digest<TT<DigestLength>>;
     static constexpr std::size_t digest_length = DigestLength;
 };
 
 template <template<std::size_t>class TT>
-struct xof_digest_typedef<TT<0>>
+struct xof_result_type<TT<0>>
 {
     template <std::size_t DigestLength>
-    using digest = digestive::digest<TT<DigestLength>>;
+    using result_type = digestive::digest<TT<DigestLength>>;
 };
 
 }
@@ -209,7 +209,7 @@ template <std::size_t Capacity>
 using keccak = adl_shield::keccak<Capacity>;
 
 template <typename T>
-using xof_digest_typedef = adl_shield::xof_digest_typedef<T>;
+using xof_result_type = adl_shield::xof_result_type<T>;
 
 } // namespace keccak_core
 } // namespace digestive

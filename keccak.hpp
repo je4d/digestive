@@ -16,20 +16,21 @@ private:
     using base = keccak_core::keccak<capacity>;
 
 public:
-    using digest = digestive::digest<T>;
+    using result_type = digestive::digest<T>;
     static constexpr std::size_t digest_length = DigestLength;
+    static constexpr std::size_t rate = keccak_core::traits<capacity>::rate;
     using digest_generating_type = keccak_fix;
     using base::operator();
 
-    explicit operator digest() const &
+    explicit operator result_type() const &
     {
-        return digest(keccak_fix(*this));
+        return result_type(keccak_fix(*this));
     }
 
-    explicit operator digest() &&
+    explicit operator result_type() &&
     {
         keccak_core::finalize<capacity,0x1>(this->m_buffer,this->m_state);
-        digest ret;
+        result_type ret;
         keccak_core::extract_digest<capacity,digest_length>(this->m_state,
                                                             ret.m_digest);
         return ret;
@@ -43,10 +44,11 @@ template <template<std::size_t>class TT, std::size_t DigestLength,
                                          std::size_t Capacity>
 struct keccak_xof<TT<DigestLength>, Capacity> :
     private keccak_core::keccak<Capacity>,
-    keccak_core::xof_digest_typedef<TT<DigestLength>>
+    keccak_core::xof_result_type<TT<DigestLength>>
 {
     using base = keccak_core::keccak<Capacity>;
 public:
+    static constexpr std::size_t rate = keccak_core::traits<Capacity>::rate;
     using digest_generating_type = keccak_xof;
     using base::operator();
 
@@ -79,7 +81,7 @@ struct keccak_256     : keccak_fix<keccak_256,    256> {};
 struct keccak_384     : keccak_fix<keccak_384,    384> {};
 struct keccak_512     : keccak_fix<keccak_512,    512> {};
 template <std::size_t DigestLength = 0>
-struct keccak_default : keccak_xof<keccak_default<DigestLength>,576> {};
+struct keccak : keccak_xof<keccak<DigestLength>,576> {};
 
 } // namespace digestive
 

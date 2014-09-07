@@ -16,21 +16,22 @@ private:
     using base = keccak_core::keccak<capacity>;
 
 public:
-    using digest = digestive::digest<T>;
+    using result_type = digestive::digest<T>;
     static constexpr std::size_t digest_length = DigestLength;
+    static constexpr std::size_t rate = keccak_core::traits<capacity>::rate;
     using digest_generating_type = sha3_fix;
     using base::operator();
 
-    explicit operator digest() const &
+    explicit operator result_type() const &
     {
-        return digest(sha3_fix(*this));
+        return result_type(sha3_fix(*this));
     }
 
-    explicit operator digest() &&
+    explicit operator result_type() &&
     {
         // Sha3(M) = Keccak(M || 01) = process(M || 01 || 10*1), in LSB0
         keccak_core::finalize<capacity,0x6>(this->m_buffer,this->m_state);
-        digest ret;
+        result_type ret;
         keccak_core::extract_digest<capacity,digest_length>(this->m_state,
                                                             ret.m_digest);
         return ret;
@@ -44,10 +45,11 @@ template <template<std::size_t>class TT, std::size_t DigestLength,
                                          std::size_t Capacity>
 struct sha3_xof<TT<DigestLength>, Capacity> :
     private keccak_core::keccak<Capacity>,
-    keccak_core::xof_digest_typedef<TT<DigestLength>>
+    keccak_core::xof_result_type<TT<DigestLength>>
 {
     using base = keccak_core::keccak<Capacity>;
 public:
+    static constexpr std::size_t rate = keccak_core::traits<Capacity>::rate;
     using digest_generating_type = sha3_xof;
     using base::operator();
 
